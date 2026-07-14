@@ -1,0 +1,166 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "cjs"
+  generatedFileExtension = "ts"
+  importFileExtension    = ""
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum PlatformRole {
+  NONE
+  SUPPORT
+  PLATFORM_ADMIN
+  SUPER_ADMIN
+}
+
+enum WebsiteStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum FieldType {
+  TEXT
+  TEXTAREA
+  RICHTEXT
+  NUMBER
+  BOOLEAN
+  DATE
+  SELECT
+  MEDIA
+  RELATION
+  JSON
+}
+
+enum EntryStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  password     String
+  name         String
+  platformRole PlatformRole  @default(NONE)
+  memberships  WebsiteUser[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("users")
+}
+
+model Website {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  domain      String?
+  status      WebsiteStatus @default(ACTIVE)
+  roles       Role[]
+  members     WebsiteUser[]
+  collections Collection[]
+  entries     Entry[]
+  media       Media[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("websites")
+}
+
+model Role {
+  id          String        @id @default(cuid())
+  websiteId   String
+  website     Website       @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name        String
+  /// array of permission strings, e.g. ["entries.create", "media.upload"]
+  permissions Json
+  members     WebsiteUser[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([websiteId, name])
+  @@map("roles")
+}
+
+model WebsiteUser {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  websiteId String
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, websiteId])
+  @@map("website_users")
+}
+
+model Collection {
+  id          String   @id @default(cuid())
+  websiteId   String
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  description String?
+  fields      Field[]
+  entries     Entry[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([websiteId, slug])
+  @@map("collections")
+}
+
+model Field {
+  id           String     @id @default(cuid())
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  name         String
+  key          String
+  type         FieldType
+  required     Boolean    @default(false)
+  order        Int        @default(0)
+  /// type-specific options, e.g. { "choices": ["a","b"] } for SELECT
+  options      Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([collectionId, key])
+  @@map("fields")
+}
+
+model Entry {
+  id           String      @id @default(cuid())
+  collectionId String
+  collection   Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  websiteId    String
+  website      Website     @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  data         Json
+  status       EntryStatus @default(DRAFT)
+  publishedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([websiteId, collectionId, status])
+  @@map("entries")
+}
+
+model Media {
+  id         String   @id @default(cuid())
+  websiteId  String
+  website    Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  filename   String
+  mimeType   String
+  size       Int
+  storageKey String
+  url        String
+  alt        String?
+  createdAt  DateTime @default(now())
+
+  @@index([websiteId])
+  @@map("media")
+}
