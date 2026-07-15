@@ -68,7 +68,9 @@ export class CollectionsService {
       where: { websiteId_slug: { websiteId, slug } },
     });
     if (existing) {
-      throw new ConflictException('Collection slug already in use on this website');
+      throw new ConflictException(
+        'Collection slug already in use on this website',
+      );
     }
   }
 }

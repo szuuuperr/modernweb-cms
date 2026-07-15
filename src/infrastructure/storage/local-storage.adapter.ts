@@ -3,11 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
-import {
-  StorageAdapter,
-  StoredFile,
-  UploadedFile,
-} from './storage.adapter';
+import { StorageAdapter, StoredFile, UploadedFile } from './storage.adapter';
 
 @Injectable()
 export class LocalStorageAdapter implements StorageAdapter {

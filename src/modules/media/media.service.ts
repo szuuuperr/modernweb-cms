@@ -71,6 +71,7 @@ export class MediaService {
         size: file.size,
         storageKey: stored.storageKey,
         url: stored.url,
+        variants: stored.variants,
         alt,
       },
     });

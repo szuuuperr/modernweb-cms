@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { ArrayNotEmpty, IsIn, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  ArrayNotEmpty,
+  IsIn,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { PERMISSIONS, Permission } from '../permissions';
 
 export class CreateRoleDto {

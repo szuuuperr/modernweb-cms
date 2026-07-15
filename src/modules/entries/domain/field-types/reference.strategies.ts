@@ -1,10 +1,10 @@
-import { Field, FieldType } from '../../../../generated/prisma/client';
-import { FieldTypeStrategy } from './field-type.strategy';
+import { FieldType } from '../../../../generated/prisma/client';
+import { FieldDefinition, FieldTypeStrategy } from './field-type.strategy';
 
 export class SelectStrategy implements FieldTypeStrategy {
   readonly type = FieldType.SELECT;
 
-  validate(value: unknown, field: Field): string | null {
+  validate(value: unknown, field: FieldDefinition): string | null {
     if (typeof value !== 'string') return 'must be a string';
     const options = (field.options ?? {}) as { choices?: string[] };
     const choices = options.choices ?? [];
@@ -23,7 +23,7 @@ export class SelectStrategy implements FieldTypeStrategy {
 export class MediaStrategy implements FieldTypeStrategy {
   readonly type = FieldType.MEDIA;
 
-  validate(value: unknown, field: Field): string | null {
+  validate(value: unknown, field: FieldDefinition): string | null {
     const options = (field.options ?? {}) as { multiple?: boolean };
     if (options.multiple) {
       if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
@@ -45,7 +45,7 @@ export class MediaStrategy implements FieldTypeStrategy {
 export class RelationStrategy implements FieldTypeStrategy {
   readonly type = FieldType.RELATION;
 
-  validate(value: unknown, field: Field): string | null {
+  validate(value: unknown, field: FieldDefinition): string | null {
     const options = (field.options ?? {}) as { multiple?: boolean };
     if (options.multiple) {
       if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {

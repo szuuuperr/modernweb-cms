@@ -1,11 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  Allow,
-  IsEnum,
-  IsObject,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { Allow, IsEnum, IsObject, IsOptional, IsString } from 'class-validator';
 import { EntryStatus } from '../../../generated/prisma/client';
 import { PaginationDto } from '../../../common/dto/pagination.dto';
 
@@ -44,7 +38,8 @@ export class QueryEntriesDto extends PaginationDto {
   sort?: string;
 
   @ApiPropertyOptional({
-    description: 'filter[key][op]=value; ops: eq, ne, gt, gte, lt, lte, contains',
+    description:
+      'filter[key][op]=value; ops: eq, ne, gt, gte, lt, lte, contains',
     type: 'object',
     additionalProperties: true,
   })

@@ -1,12 +1,15 @@
 import 'dotenv/config';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { DEFAULT_ROLES } from '../src/modules/rbac/permissions';
 import {
   EntryStatus,
   FieldType,
+  PageStatus,
   PlatformRole,
   PrismaClient,
+  SeoTarget,
 } from '../src/generated/prisma/client';
 
 function mariaDbConfigFromUrl(url: string) {
@@ -61,6 +64,15 @@ async function main() {
       },
     });
     console.log(`Website created: ${website.name}`);
+  }
+
+  // Roles seeded before a new phase added permissions would otherwise keep the
+  // old set. Safe here because the seeded website's roles are never customised.
+  for (const role of DEFAULT_ROLES) {
+    await prisma.role.updateMany({
+      where: { websiteId: website.id, name: role.name },
+      data: { permissions: role.permissions },
+    });
   }
 
   const ownerRole = await prisma.role.findUnique({
@@ -160,6 +172,152 @@ async function main() {
       ],
     });
     console.log('Sample entries created (2 published, 1 draft)');
+  }
+
+  await seedFase2(website.id);
+}
+
+/** Pages, menus, SEO, settings and an API key for the seeded website. */
+async function seedFase2(websiteId: string) {
+  const homePage = await prisma.page.upsert({
+    where: { websiteId_slug: { websiteId, slug: 'tentang-kami' } },
+    update: {},
+    create: {
+      websiteId,
+      title: 'Tentang Kami',
+      slug: 'tentang-kami',
+      status: PageStatus.PUBLISHED,
+      publishedAt: new Date(),
+      blocks: [
+        {
+          type: 'hero',
+          props: {
+            heading: 'Tentang Halwa Travel',
+            subheading: 'Teman perjalanan Anda sejak 2015',
+          },
+        },
+        {
+          type: 'richtext',
+          props: {
+            html: '<p>Kami menyediakan paket wisata domestik dan internasional.</p>',
+          },
+        },
+      ],
+    },
+  });
+  console.log(`Page: ${homePage.slug} (${homePage.status})`);
+
+  await prisma.websiteSeoDefault.upsert({
+    where: { websiteId },
+    update: {},
+    create: {
+      websiteId,
+      titleTemplate: '%s | Halwa Travel',
+      metaTitle: 'Halwa Travel — Paket Wisata Indonesia',
+      metaDescription:
+        'Paket wisata Bromo, Bali, Raja Ampat dan destinasi lainnya.',
+    },
+  });
+
+  await prisma.seo.upsert({
+    where: {
+      targetType_targetId: { targetType: SeoTarget.PAGE, targetId: homePage.id },
+    },
+    update: {},
+    create: {
+      websiteId,
+      targetType: SeoTarget.PAGE,
+      targetId: homePage.id,
+      metaTitle: 'Tentang Kami',
+      metaDescription: 'Kenali Halwa Travel lebih dekat.',
+    },
+  });
+  console.log('SEO defaults + page SEO set');
+
+  const existingMenu = await prisma.menu.findUnique({
+    where: { websiteId_slug: { websiteId, slug: 'main-nav' } },
+  });
+  if (!existingMenu) {
+    const menu = await prisma.menu.create({
+      data: { websiteId, name: 'Main Navigation', slug: 'main-nav' },
+    });
+    const packages = await prisma.menuItem.create({
+      data: { menuId: menu.id, label: 'Paket Wisata', url: '/tour-packages', order: 0 },
+    });
+    await prisma.menuItem.createMany({
+      data: [
+        { menuId: menu.id, parentId: packages.id, label: 'Bromo', url: '/tour-packages/bromo-sunrise-tour', order: 0 },
+        { menuId: menu.id, parentId: packages.id, label: 'Bali', url: '/tour-packages/bali-beach-escape', order: 1 },
+        { menuId: menu.id, label: 'Tentang Kami', pageId: homePage.id, url: '/tentang-kami', order: 1 },
+      ],
+    });
+    console.log('Menu "main-nav" created (1 nested level)');
+  }
+
+  const settings: { key: string; value: unknown }[] = [
+    {
+      key: 'contact',
+      value: {
+        phone: '+62 812 0000 0000',
+        whatsapp: '+62 812 0000 0000',
+        email: 'halo@halwatravel.com',
+      },
+    },
+    {
+      key: 'social',
+      value: { instagram: 'halwatravel', facebook: 'halwatravel' },
+    },
+    { key: 'currency', value: 'IDR' },
+  ];
+  for (const setting of settings) {
+    await prisma.setting.upsert({
+      where: { websiteId_key: { websiteId, key: setting.key } },
+      update: {},
+      create: { websiteId, key: setting.key, value: setting.value as never },
+    });
+  }
+  console.log(`Settings seeded: ${settings.map((s) => s.key).join(', ')}`);
+
+  const existingForm = await prisma.form.findUnique({
+    where: { websiteId_slug: { websiteId, slug: 'kontak' } },
+  });
+  if (!existingForm) {
+    await prisma.form.create({
+      data: {
+        websiteId,
+        name: 'Kontak',
+        slug: 'kontak',
+        notifyEmails: ['sales@halwatravel.com'],
+        fields: [
+          { key: 'nama', name: 'Nama', type: FieldType.TEXT, required: true },
+          { key: 'email', name: 'Email', type: FieldType.TEXT, required: true },
+          { key: 'pesan', name: 'Pesan', type: FieldType.TEXTAREA, required: true },
+          {
+            key: 'topik',
+            name: 'Topik',
+            type: FieldType.SELECT,
+            options: { choices: ['umum', 'kerjasama'] },
+          },
+        ],
+      },
+    });
+    console.log('Form "kontak" created');
+  }
+
+  const hasKey = await prisma.apiKey.findFirst({ where: { websiteId } });
+  if (!hasKey) {
+    const prefix = `mwc_${randomBytes(4).toString('hex')}`;
+    const plaintext = `${prefix}_${randomBytes(24).toString('base64url')}`;
+    await prisma.apiKey.create({
+      data: {
+        websiteId,
+        name: 'Seed development key',
+        prefix,
+        keyHash: await bcrypt.hash(plaintext, 10),
+      },
+    });
+    // Only ever printed here: the API stores a hash and cannot show it again.
+    console.log(`API key (dev, save it now): ${plaintext}`);
   }
 }
 

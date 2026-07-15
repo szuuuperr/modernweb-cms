@@ -9,6 +9,10 @@ COPY prisma.config.ts tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY prisma ./prisma
 COPY src ./src
 
+# prisma.config.ts resolves env('DATABASE_URL') as soon as it loads, even though
+# `generate` never opens a connection. This placeholder only exists in the build
+# stage — the real URL is injected at runtime by compose.
+ENV DATABASE_URL="mysql://placeholder:placeholder@localhost:3306/placeholder"
 RUN npx prisma generate && npm run build
 
 # ---- Runtime stage ----
@@ -23,4 +27,6 @@ COPY package*.json prisma.config.ts ./
 COPY prisma ./prisma
 
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+# dist/src/main, not dist/main: prisma.config.ts at the repo root is part of the
+# TS build, so the inferred rootDir is the project root and output is nested.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]

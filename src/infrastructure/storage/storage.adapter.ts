@@ -11,6 +11,12 @@ export interface UploadedFile {
 export interface StoredFile {
   storageKey: string;
   url: string;
+  /**
+   * Pre-derived variant URLs keyed by name (e.g. { thumb, medium }).
+   * Adapters that cannot derive variants simply omit this, which keeps
+   * MediaService free of any provider-specific knowledge.
+   */
+  variants?: Record<string, string>;
 }
 
 export interface StorageAdapter {

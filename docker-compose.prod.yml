@@ -1,0 +1,130 @@
+# Production stack — separate from docker-compose.yml (dev) on purpose:
+# the dev file exposes MySQL on the host and uses throwaway passwords, and prod
+# must never share a database or a volume with it.
+#
+# Usage: docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+# See docs/DEPLOY.md.
+
+name: modernweb-cms-prod
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mwcms-prod-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env.production}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-modernweb_cms}
+    volumes:
+      - mysql_prod_data:/var/lib/mysql
+    # No published ports: only the app reaches it, over the compose network.
+    healthcheck:
+      test:
+        ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-p${MYSQL_ROOT_PASSWORD}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: mwcms-prod-redis
+    restart: always
+    # Light persistence: the cache can be lost safely, but surviving a restart
+    # avoids a cold-start stampede on the database.
+    command: ['redis-server', '--save', '60', '1', '--appendonly', 'no']
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  app:
+    build: .
+    container_name: mwcms-prod-app
+    restart: always
+    environment:
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-modernweb_cms}
+      REDIS_URL: redis://redis:6379
+      # No defaults on purpose — the stack refuses to start with weak secrets.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env.production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      APP_URL: ${APP_URL:?set APP_URL in .env.production}
+      PORT: 3000
+      # One proxy hop (nginx), so req.ip is the real client — without this the
+      # rate limiter would treat every anonymous visitor as one client.
+      TRUST_PROXY: '1'
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-cloudinary}
+      CLOUDINARY_URL: ${CLOUDINARY_URL:-}
+      CONTENT_CACHE_TTL: ${CONTENT_CACHE_TTL:-60}
+      CONTENT_RATE_LIMIT: ${CONTENT_RATE_LIMIT:-120}
+      CONTENT_RATE_TTL_MS: ${CONTENT_RATE_TTL_MS:-60000}
+      PREVIEW_TOKEN_TTL: ${PREVIEW_TOKEN_TTL:-1h}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # No fallback: with SMTP_HOST set, the app requires a real SMTP_FROM.
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      # Only used when STORAGE_DRIVER=local; harmless otherwise.
+      - uploads_prod_data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - '3000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    container_name: mwcms-prod-nginx
+    restart: always
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./docker/nginx.prod.conf:/etc/nginx/templates/default.conf.template:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    environment:
+      # nginx:alpine expands ${DOMAIN} in templates/ at startup.
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+    depends_on:
+      - app
+
+  # Renewal only. The first certificate is issued by hand — see docs/DEPLOY.md.
+  certbot:
+    image: certbot/certbot
+    container_name: mwcms-prod-certbot
+    restart: always
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: >
+      sh -c "trap exit TERM;
+      while :; do certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done"
+
+volumes:
+  mysql_prod_data:
+  redis_prod_data:
+  uploads_prod_data:
+  certbot_conf:
+  certbot_www:

@@ -26,7 +26,8 @@ export class CreateFieldDto {
   })
   @IsString()
   @Matches(/^[a-zA-Z][a-zA-Z0-9_]*$/, {
-    message: 'key must start with a letter and contain only letters, numbers, underscores',
+    message:
+      'key must start with a letter and contain only letters, numbers, underscores',
   })
   @MaxLength(60)
   key: string;
@@ -47,7 +48,8 @@ export class CreateFieldDto {
   order?: number;
 
   @ApiPropertyOptional({
-    description: 'Type-specific options, e.g. { "choices": ["a", "b"] } for SELECT',
+    description:
+      'Type-specific options, e.g. { "choices": ["a", "b"] } for SELECT',
   })
   @IsOptional()
   @IsObject()

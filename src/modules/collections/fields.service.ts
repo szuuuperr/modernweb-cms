@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { CreateFieldDto, UpdateFieldDto } from './dto/create-field.dto';
 
@@ -26,7 +27,8 @@ export class FieldsService {
         type: dto.type,
         required: dto.required ?? false,
         order: dto.order ?? 0,
-        options: (dto.options ?? undefined) as object | undefined,
+        options: (dto.options ?? undefined) as
+          Prisma.InputJsonValue | undefined,
       },
     });
   }
@@ -50,7 +52,8 @@ export class FieldsService {
       where: { id: fieldId },
       data: {
         ...dto,
-        options: (dto.options ?? undefined) as object | undefined,
+        options: (dto.options ?? undefined) as
+          Prisma.InputJsonValue | undefined,
       },
     });
   }

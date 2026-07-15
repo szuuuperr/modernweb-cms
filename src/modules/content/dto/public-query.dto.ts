@@ -12,7 +12,8 @@ export class PublicQueryEntriesDto extends PaginationDto {
   sort?: string;
 
   @ApiPropertyOptional({
-    description: 'filter[key][op]=value; ops: eq, ne, gt, gte, lt, lte, contains',
+    description:
+      'filter[key][op]=value; ops: eq, ne, gt, gte, lt, lte, contains',
     type: 'object',
     additionalProperties: true,
   })

@@ -10,6 +10,16 @@ async function bootstrap() {
   // Express 5 defaults to the "simple" query parser; "extended" is needed
   // so nested filters like filter[price][gte]=1000 parse into objects.
   app.set('query parser', 'extended');
+
+  // Behind nginx, req.ip is the proxy's address unless we trust X-Forwarded-For
+  // — which would bucket every anonymous visitor into one rate-limit key and
+  // record the wrong IP in the audit log. Off by default: trusting the header
+  // when there is no proxy in front lets clients spoof their address.
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy) {
+    app.set('trust proxy', Number(trustProxy) || trustProxy);
+  }
+
   app.enableCors();
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
@@ -31,7 +41,9 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
-  console.log(`ModernWeb CMS running on http://localhost:${port} (docs at /docs)`);
+  console.log(
+    `ModernWeb CMS running on http://localhost:${port} (docs at /docs)`,
+  );
 }
 
 void bootstrap();

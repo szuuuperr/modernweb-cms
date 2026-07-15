@@ -43,10 +43,7 @@ export class WebsitesController {
 
   @Patch(':websiteId')
   @RequirePermissions('websites.update')
-  update(
-    @Param('websiteId') websiteId: string,
-    @Body() dto: UpdateWebsiteDto,
-  ) {
+  update(@Param('websiteId') websiteId: string, @Body() dto: UpdateWebsiteDto) {
     return this.websitesService.update(websiteId, dto);
   }
 

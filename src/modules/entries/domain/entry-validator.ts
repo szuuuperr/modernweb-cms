@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import type { Field } from '../../../generated/prisma/client';
+import type { FieldDefinition } from './field-types/field-type.strategy';
 import { FieldTypeRegistry } from './field-type.registry';
 
 /**
@@ -11,7 +11,7 @@ export class EntryValidator {
   constructor(private readonly registry: FieldTypeRegistry) {}
 
   validate(
-    fields: Field[],
+    fields: FieldDefinition[],
     data: Record<string, unknown>,
     { partial = false }: { partial?: boolean } = {},
   ): Record<string, unknown> {

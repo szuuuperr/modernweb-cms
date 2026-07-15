@@ -40,6 +40,24 @@ enum EntryStatus {
   PUBLISHED
 }
 
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+}
+
+/// What a Seo row describes. Kept as an enum (not a free string) so the
+/// polymorphic targetId can only ever point at a table we know how to check.
+enum SeoTarget {
+  PAGE
+  ENTRY
+}
+
 model User {
   id           String        @id @default(cuid())
   email        String        @unique
@@ -47,6 +65,7 @@ model User {
   name         String
   platformRole PlatformRole  @default(NONE)
   memberships  WebsiteUser[]
+  auditLogs    AuditLog[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -59,11 +78,24 @@ model Website {
   slug        String        @unique
   domain      String?
   status      WebsiteStatus @default(ACTIVE)
+  /// When true the public Content API rejects requests without a valid x-api-key.
+  requireApiKey Boolean     @default(false)
   roles       Role[]
   members     WebsiteUser[]
   collections Collection[]
   entries     Entry[]
   media       Media[]
+  pages       Page[]
+  menus       Menu[]
+  settings    Setting[]
+  apiKeys     ApiKey[]
+  webhooks    Webhook[]
+  auditLogs   AuditLog[]
+  forms       Form[]
+  submissions FormSubmission[]
+  pageViews   PageView[]
+  seo         Seo[]
+  seoDefault  WebsiteSeoDefault?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -159,8 +191,243 @@ model Media {
   storageKey String
   url        String
   alt        String?
+  /// provider-derived variant URLs, e.g. { "thumb": "...", "medium": "..." }
+  variants   Json?
   createdAt  DateTime @default(now())
 
   @@index([websiteId])
   @@map("media")
+}
+
+model Page {
+  id          String     @id @default(cuid())
+  websiteId   String
+  website     Website    @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  title       String
+  slug        String
+  /// ordered list of content blocks, e.g. [{ "type": "hero", "props": {...} }]
+  blocks      Json
+  status      PageStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([websiteId, slug])
+  @@index([websiteId, status])
+  @@map("pages")
+}
+
+model Menu {
+  id        String     @id @default(cuid())
+  websiteId String
+  website   Website    @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name      String
+  slug      String
+  items     MenuItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([websiteId, slug])
+  @@map("menus")
+}
+
+model MenuItem {
+  id       String     @id @default(cuid())
+  menuId   String
+  menu     Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  parentId String?
+  parent   MenuItem?  @relation("MenuItemTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children MenuItem[] @relation("MenuItemTree")
+  label    String
+  url      String?
+  /// optional link target inside the CMS, resolved by the frontend
+  pageId   String?
+  entryId  String?
+  target   String?
+  order    Int        @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([menuId, parentId, order])
+  @@map("menu_items")
+}
+
+/// SEO metadata for any target type. One row per target, so entry/page
+/// content stays free of presentation concerns.
+model Seo {
+  id              String    @id @default(cuid())
+  websiteId       String
+  website         Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  targetType      SeoTarget
+  targetId        String
+  metaTitle       String?
+  metaDescription String?   @db.Text
+  ogImageUrl      String?
+  canonicalUrl    String?
+  noIndex         Boolean   @default(false)
+  /// free-form extras (twitter card, structured data, ...)
+  extra           Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([targetType, targetId])
+  @@index([websiteId, targetType])
+  @@map("seo")
+}
+
+model WebsiteSeoDefault {
+  id              String   @id @default(cuid())
+  websiteId       String   @unique
+  website         Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  /// e.g. "%s | Halwa Travel" — %s is replaced with the target's metaTitle
+  titleTemplate   String?
+  metaTitle       String?
+  metaDescription String?  @db.Text
+  ogImageUrl      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("website_seo_defaults")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  websiteId String
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  key       String
+  /// any JSON value: string, number, boolean, object or array
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([websiteId, key])
+  @@map("settings")
+}
+
+model Webhook {
+  id         String            @id @default(cuid())
+  websiteId  String
+  website    Website           @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name       String
+  url        String            @db.Text
+  /// subscribed event names, e.g. ["entry.published", "page.updated"]
+  events     Json
+  /// shared secret; receivers verify the x-mwc-signature HMAC with it
+  secret     String
+  active     Boolean           @default(true)
+  deliveries WebhookDelivery[]
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([websiteId])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id             String                @id @default(cuid())
+  webhookId      String
+  webhook        Webhook               @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event          String
+  payload        Json
+  status         WebhookDeliveryStatus @default(PENDING)
+  attempts       Int                   @default(0)
+  responseStatus Int?
+  lastError      String?               @db.Text
+  deliveredAt    DateTime?
+  createdAt      DateTime              @default(now())
+
+  @@index([webhookId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+/// Who did what, when. Append-only: rows are never updated.
+model AuditLog {
+  id        String   @id @default(cuid())
+  /// null for platform-level actions not scoped to a website
+  websiteId String?
+  website   Website? @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  /// null when the actor was the system (seed/cron) or an unauthenticated call
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  /// denormalised so the log stays readable after a user is deleted
+  actorEmail String?
+  resource  String
+  action    String
+  targetId  String?
+  meta      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([websiteId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+model Form {
+  id          String           @id @default(cuid())
+  websiteId   String
+  website     Website          @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  /// field definitions, same shape as collection fields:
+  /// [{ key, name, type, required, options }]
+  fields      Json
+  /// addresses notified on submission, e.g. ["sales@halwatravel.com"]
+  notifyEmails Json
+  active      Boolean          @default(true)
+  submissions FormSubmission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([websiteId, slug])
+  @@map("forms")
+}
+
+model FormSubmission {
+  id        String   @id @default(cuid())
+  formId    String
+  form      Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
+  websiteId String
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  data      Json
+  ip        String?
+  userAgent String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([formId, createdAt])
+  @@index([websiteId, createdAt])
+  @@map("form_submissions")
+}
+
+/// One row per website+path+day, incremented on each view — keeps the table
+/// small at the cost of per-visit detail.
+model PageView {
+  id        String   @id @default(cuid())
+  websiteId String
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  path      String   @db.VarChar(500)
+  day       DateTime @db.Date
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([websiteId, path, day])
+  @@index([websiteId, day])
+  @@map("page_views")
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  websiteId  String
+  website    Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name       String
+  /// first chars of the key, shown in the UI so a key can be recognised
+  prefix     String    @unique
+  /// bcrypt hash — the plaintext key is returned once, at creation
+  keyHash    String
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([websiteId])
+  @@map("api_keys")
 }

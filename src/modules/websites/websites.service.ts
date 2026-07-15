@@ -40,9 +40,7 @@ export class WebsitesService {
       user.platformRole === PlatformRole.SUPER_ADMIN ||
       user.platformRole === PlatformRole.PLATFORM_ADMIN ||
       user.platformRole === PlatformRole.SUPPORT;
-    const where = isPlatform
-      ? {}
-      : { members: { some: { userId: user.id } } };
+    const where = isPlatform ? {} : { members: { some: { userId: user.id } } };
 
     const [items, total] = await Promise.all([
       this.prisma.website.findMany({

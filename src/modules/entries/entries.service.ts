@@ -1,8 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { paginate } from '../../common/dto/pagination.dto';
-import { EntryStatus, Prisma } from '../../generated/prisma/client';
+import {
+  CONTENT_CHANGED,
+  ContentAction,
+  ContentChangedEvent,
+} from '../../common/events/content-changed.event';
+import { EntryStatus, Prisma, SeoTarget } from '../../generated/prisma/client';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
+import { SeoService } from '../seo/seo.service';
 import { EntryValidator } from './domain/entry-validator';
 import { EntriesRepository } from './entries.repository';
 import { EntryQueryBuilder } from './entry-query.builder';
@@ -23,10 +29,15 @@ export class EntriesService {
     private readonly prisma: PrismaService,
     private readonly repository: EntriesRepository,
     private readonly validator: EntryValidator,
+    private readonly seo: SeoService,
     private readonly events: EventEmitter2,
   ) {}
 
-  async findAll(websiteId: string, collectionId: string, query: QueryEntriesDto) {
+  async findAll(
+    websiteId: string,
+    collectionId: string,
+    query: QueryEntriesDto,
+  ) {
     await this.getCollectionOrThrow(websiteId, collectionId);
     const builder = new EntryQueryBuilder()
       .forCollection(websiteId, collectionId)
@@ -81,9 +92,13 @@ export class EntriesService {
       ...(entry.data as Record<string, unknown>),
       ...cleaned,
     };
-    return this.repository.update(entryId, {
+    const updated = await this.repository.update(entryId, {
       data: merged as Prisma.InputJsonValue,
     });
+    // Editing an already-published entry changes what the public API serves,
+    // so the cache must drop it even though the status did not change.
+    this.emitChanged(websiteId, 'updated', entryId);
+    return updated;
   }
 
   async publish(websiteId: string, collectionId: string, entryId: string) {
@@ -116,7 +131,10 @@ export class EntriesService {
 
   async remove(websiteId: string, collectionId: string, entryId: string) {
     await this.findOne(websiteId, collectionId, entryId);
+    // Seo rows are polymorphic, so no FK cascade cleans them up for us.
+    await this.seo.removeForTarget(SeoTarget.ENTRY, entryId);
     await this.repository.delete(entryId);
+    this.emitChanged(websiteId, 'deleted', entryId);
     return { deleted: true };
   }
 
@@ -128,6 +146,19 @@ export class EntriesService {
     this.events.emit(
       eventName,
       new EntryPublishedEvent(entryId, entry.websiteId, entry.collectionId),
+    );
+    this.emitChanged(
+      entry.websiteId,
+      eventName === ENTRY_PUBLISHED ? 'published' : 'unpublished',
+      entryId,
+    );
+  }
+
+  /** Drives cache invalidation and webhook delivery. */
+  private emitChanged(websiteId: string, action: ContentAction, id: string) {
+    this.events.emit(
+      CONTENT_CHANGED,
+      new ContentChangedEvent(websiteId, 'entry', action, id),
     );
   }
 

@@ -3,6 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AUDIT_ACTION, AuditEvent } from '../../common/events/audit.event';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { AddMemberDto, UpdateMemberDto } from './dto/member.dto';
 
@@ -13,7 +15,23 @@ const MEMBER_INCLUDE = {
 
 @Injectable()
 export class MembersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: EventEmitter2,
+  ) {}
+
+  /** Granting and revoking access to a website is audit-worthy by definition. */
+  private audit(
+    websiteId: string,
+    action: string,
+    memberId: string,
+    meta?: Record<string, unknown>,
+  ) {
+    this.events.emit(
+      AUDIT_ACTION,
+      new AuditEvent(websiteId, 'member', action, memberId, meta),
+    );
+  }
 
   findAll(websiteId: string) {
     return this.prisma.websiteUser.findMany({
@@ -36,25 +54,36 @@ export class MembersService {
     });
     if (existing) throw new ConflictException('User is already a member');
 
-    return this.prisma.websiteUser.create({
+    const member = await this.prisma.websiteUser.create({
       data: { websiteId, userId: user.id, roleId: dto.roleId },
       include: MEMBER_INCLUDE,
     });
+    this.audit(websiteId, 'added', member.id, {
+      email: user.email,
+      role: member.role.name,
+    });
+    return member;
   }
 
   async updateRole(websiteId: string, memberId: string, dto: UpdateMemberDto) {
     await this.findMemberOrThrow(websiteId, memberId);
     await this.ensureRoleBelongsToWebsite(websiteId, dto.roleId);
-    return this.prisma.websiteUser.update({
+    const member = await this.prisma.websiteUser.update({
       where: { id: memberId },
       data: { roleId: dto.roleId },
       include: MEMBER_INCLUDE,
     });
+    this.audit(websiteId, 'role_changed', memberId, {
+      email: member.user.email,
+      role: member.role.name,
+    });
+    return member;
   }
 
   async remove(websiteId: string, memberId: string) {
     await this.findMemberOrThrow(websiteId, memberId);
     await this.prisma.websiteUser.delete({ where: { id: memberId } });
+    this.audit(websiteId, 'removed', memberId);
     return { deleted: true };
   }
 

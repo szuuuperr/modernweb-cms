@@ -68,7 +68,9 @@ export class EntryQueryBuilder {
   sortBy(sort?: string): this {
     if (!sort) return this;
     const [column, direction = 'asc'] = sort.split(':');
-    if (!SORTABLE_COLUMNS.includes(column as (typeof SORTABLE_COLUMNS)[number])) {
+    if (
+      !SORTABLE_COLUMNS.includes(column as (typeof SORTABLE_COLUMNS)[number])
+    ) {
       throw new BadRequestException(
         `Can only sort by: ${SORTABLE_COLUMNS.join(', ')}`,
       );

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEnum,
   IsOptional,
   IsString,
@@ -36,4 +37,12 @@ export class UpdateWebsiteDto extends PartialType(CreateWebsiteDto) {
   @IsOptional()
   @IsEnum(WebsiteStatus)
   status?: WebsiteStatus;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'require a valid x-api-key on the public Content API',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requireApiKey?: boolean;
 }

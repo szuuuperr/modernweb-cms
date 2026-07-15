@@ -1,10 +1,10 @@
-import { Field, FieldType } from '../../../../generated/prisma/client';
-import { FieldTypeStrategy } from './field-type.strategy';
+import { FieldType } from '../../../../generated/prisma/client';
+import { FieldDefinition, FieldTypeStrategy } from './field-type.strategy';
 
 abstract class StringLikeStrategy implements FieldTypeStrategy {
   abstract readonly type: FieldType;
 
-  validate(value: unknown, field: Field): string | null {
+  validate(value: unknown, field: FieldDefinition): string | null {
     if (typeof value !== 'string') return 'must be a string';
     const options = (field.options ?? {}) as { maxLength?: number };
     if (options.maxLength && value.length > options.maxLength) {

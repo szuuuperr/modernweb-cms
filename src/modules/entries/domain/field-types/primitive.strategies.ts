@@ -1,10 +1,10 @@
-import { Field, FieldType } from '../../../../generated/prisma/client';
-import { FieldTypeStrategy } from './field-type.strategy';
+import { FieldType } from '../../../../generated/prisma/client';
+import { FieldDefinition, FieldTypeStrategy } from './field-type.strategy';
 
 export class NumberStrategy implements FieldTypeStrategy {
   readonly type = FieldType.NUMBER;
 
-  validate(value: unknown, field: Field): string | null {
+  validate(value: unknown, field: FieldDefinition): string | null {
     if (typeof value !== 'number' || Number.isNaN(value)) {
       return 'must be a number';
     }
