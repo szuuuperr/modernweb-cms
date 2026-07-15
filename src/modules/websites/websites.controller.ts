@@ -35,6 +35,19 @@ export class WebsitesController {
     return this.websitesService.findAllFor(user, pagination);
   }
 
+  /**
+   * Intentionally unguarded beyond authentication: it answers "what may I do
+   * here", so requiring websites.read would 403 exactly the non-members whose
+   * answer is "nothing".
+   */
+  @Get(':websiteId/me')
+  permissions(
+    @CurrentUser() user: AuthUser,
+    @Param('websiteId') websiteId: string,
+  ) {
+    return this.websitesService.permissionsFor(user, websiteId);
+  }
+
   @Get(':websiteId')
   @RequirePermissions('websites.read')
   findOne(@Param('websiteId') websiteId: string) {

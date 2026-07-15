@@ -48,20 +48,38 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 const ALL: Permission[] = [...PERMISSIONS];
 
-/** Handing these out mints credentials, so they stay with the Owner. */
-const OWNER_ONLY: Permission[] = [
-  'roles.manage',
+/**
+ * Not granted by any website role — only the platform-role short-circuit in
+ * PermissionsGuard reaches these.
+ *
+ * An API key authenticates the frontend that ModernWeb builds and deploys, and
+ * a webhook ships content to an arbitrary URL under its own secret. Both are
+ * platform infrastructure: the client has nowhere to install a key and no
+ * reason to point a webhook anywhere. Leaving them on the Owner role would let
+ * a client mint credentials over curl while the panel hides the menu — a
+ * boundary that only looks like it exists.
+ */
+export const PLATFORM_ONLY_PERMISSIONS: Permission[] = [
+  'apikeys.read',
   'apikeys.manage',
-  // A webhook ships content to an arbitrary URL and carries its own secret.
+  'webhooks.read',
   'webhooks.manage',
 ];
+const PLATFORM_ONLY = PLATFORM_ONLY_PERMISSIONS;
+
+/** Owner keeps these; they hand out access, so a Manager must not. */
+const OWNER_ONLY: Permission[] = ['roles.manage'];
+
+const CLIENT_ALL: Permission[] = ALL.filter(
+  (p) => !PLATFORM_ONLY.includes(p),
+);
 
 /** Default roles created for every new website. */
 export const DEFAULT_ROLES: { name: string; permissions: Permission[] }[] = [
-  { name: 'Owner', permissions: ALL },
+  { name: 'Owner', permissions: CLIENT_ALL },
   {
     name: 'Manager',
-    permissions: ALL.filter((p) => !OWNER_ONLY.includes(p)),
+    permissions: CLIENT_ALL.filter((p) => !OWNER_ONLY.includes(p)),
   },
   {
     name: 'Editor',

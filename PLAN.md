@@ -106,10 +106,74 @@ ModernWeb CMS adalah **platform headless CMS multi-website**: satu backend (Nest
 6. **Prod dipisah total dari dev** (`docker-compose.prod.yml`, bukan profile): profile lama membuat app prod boot ke database dev dengan password dev. Prod punya volume sendiri, MySQL tidak mengekspos port, dan secret wajib (`${JWT_SECRET:?}`) sehingga stack menolak start dengan nilai kosong.
 7. **`TRUST_PROXY` wajib di belakang nginx**: tanpa itu `req.ip` = IP nginx, sehingga rate limit publik memperlakukan seluruh pengunjung anonim sebagai satu klien dan audit log mencatat IP salah. Default mati — mempercayai `X-Forwarded-For` tanpa proxy di depan justru membuat IP bisa dipalsukan.
 
-## Fase 5 — Admin Panel (repo terpisah)
+## Fase 5 — Admin Panel (repo terpisah) 🚧
 
-- Next.js + TypeScript + TailwindCSS, repo `modernweb-cms-admin`
-- Login, manajemen website, collection builder (drag-drop field), entry editor dinamis (form dirender dari definisi fields), media library, user & role management
+Repo: `C:\project\modernweb-cms-admin` — Next.js 16 (App Router) + React 19 + TypeScript + Tailwind v4, dideploy ke Vercel di `cms.modernwebid.com`.
+
+- [x] Login + sesi (access token di memory, refresh via httpOnly cookie)
+- [x] Manajemen website (list, buat, edit, status, requireApiKey)
+- [x] Collection builder + drag-drop field (dnd-kit)
+- [x] Entry editor dinamis — form dirender dari definisi fields, 10 FieldType
+- [x] Media library (upload, hapus, varian thumbnail)
+- [x] Anggota & role (editor permission per resource)
+- [x] Users + platform role
+- [x] `noindex, nofollow` + `robots.txt` Disallow
+- [x] Design system (`design.md` + token `@theme`, primary `#00419c`, Poppins)
+- [x] **UI modul Fase 2**: Pages (editor block), Menus (tree drag-drop), SEO (defaults + per page/entry), Settings (key→JSON), API Keys (plaintext sekali tampil)
+- [x] **UI modul Fase 3**: Webhooks (CRUD, pemilih event dari API, secret sekali tampil + rotate, log kiriman dengan payload & error). Cloudinary/cache/invalidasi tidak punya layar — semuanya konfigurasi backend; varian Cloudinary sudah dipakai media library.
+- [x] **UI modul Fase 4**: Forms (builder field + notifikasi email) & submissions (+ ekspor CSV), Analytics (chart harian + path terpopuler), Audit log (filter + detail), tombol Preview di editor page/entry
+- [ ] Deploy ke Vercel + set `ADMIN_ORIGINS` di API produksi
+
+### Perubahan di repo backend untuk Fase 5
+
+1. **Refresh token pindah ke httpOnly cookie** (`mwc_rt`, `Path=/api/v1/auth`, host-only). `login`/`register` men-set cookie dan **tidak lagi mengembalikan `refreshToken` di body**; `refresh` membaca cookie (body tetap jadi fallback untuk klien non-browser); `logout` baru untuk menghapusnya.
+2. **CORS jadi delegate**: `credentials: true` hanya untuk origin di `ADMIN_ORIGINS`. Origin lain tetap dapat akses terbuka tanpa cookie seperti sebelumnya, supaya Content API publik tidak rusak.
+3. **`GET /websites/:websiteId/me`** — permission efektif user di satu website, supaya admin panel bisa merender hanya kontrol yang boleh dipakai. Sengaja tanpa `@RequirePermissions`.
+4. **`allowPublicKeyRetrieval` di `DATABASE_URL`** — MySQL 8 memakai `caching_sha2_password`; tanpa opsi ini driver mariadb gagal connect ke database dev lewat socket non-TLS.
+
+### Keputusan Fase 5
+
+1. **CSR penuh, bukan static export.** Semua halaman dashboard `'use client'`, tapi tetap app Next biasa (bukan `output: 'export'`) supaya proxy/middleware, image optimization, dan route handler tersedia bila nanti dibutuhkan. **`app/layout.tsx` wajib tetap Server Component** — `export const metadata` diabaikan di client component, dan export itulah yang menghasilkan `noindex`.
+2. **Access token di memory + refresh di httpOnly cookie.** Menyimpan token di localStorage membuatnya terbaca script mana pun kalau ada XSS — ini panel super admin multi-tenant. `JwtStrategy` **tidak diubah**: access token tetap lewat `Authorization: Bearer`, sehingga tidak ada permukaan CSRF (cookie saja tidak mengautentikasi apa pun selain `/auth/refresh`). Konsekuensi: reload tab selalu mulai tanpa token, jadi `AuthProvider` menukar cookie jadi token dulu sebelum memutuskan user anonim.
+3. **`SameSite=Lax` cukup** karena `cms.` dan `api.modernwebid.com` itu same-site. **Deployment preview Vercel (`*.vercel.app`) beda registrable domain** dan butuh `COOKIE_SAMESITE=none` + `COOKIE_SECURE=true`, kalau tidak login-nya gagal senyap.
+4. **Guard login di client, bukan proxy/middleware.** Cookie host-only ke `api.` tidak pernah terlihat oleh `cms.`, dan memverifikasi JWT di edge butuh `JWT_SECRET` yang tidak boleh dikopi ke Vercel. `AuthGuard` hanya redirect demi UX; yang menegakkan tetap backend.
+5. **Permission UI hanya kosmetik.** `useCan` menyembunyikan tombol yang pasti 403. `PermissionsGuard` di backend tetap satu-satunya gerbang.
+6. **Validasi entry di client hanya cek `required`.** Tipe/range/choices diserahkan ke field-type strategies backend — menduplikasi aturannya berarti dua validator yang pasti menyimpang, dan pesan error backend sudah spesifik ("must be one of: …") sehingga ditampilkan apa adanya.
+7. **Reorder field = PATCH per field.** Tidak seperti `MenuItem`, `Field` tidak punya endpoint reorder; hanya field yang indeksnya benar-benar berubah yang dikirim.
+8. **`options.collectionId` pada field RELATION murni untuk UI.** `RelationStrategy` menerima id entry mana pun tanpa mengecek collection tujuan, jadi opsi ini hanya memberi tahu editor pilihan mana yang ditawarkan.
+9. **Editor block bersifat generik (tipe + JSON props), bukan form per tipe.** Kontrak `PageBlockDto` hanya menjamin `type`; `props` sengaja bebas supaya tipe block baru tidak butuh perubahan backend. Form khusus per tipe berarti admin harus tahu setiap tipe block milik setiap klien — justru yang dihindari desain ini. Block juga diberi id sisi-klien hanya untuk drag-drop: block tidak punya identitas di database (hidup di satu kolom JSON), dan index array akan rusak begitu dua block bertukar posisi.
+10. **Menu: drag hanya mengurutkan antar-saudara; pindah induk lewat form.** Drag lintas level mudah dipicu tidak sengaja dan mahal dibuat benar. Pilihan induk menyembunyikan diri sendiri + keturunannya, jadi siklus tidak pernah ditawarkan (backend tetap menolaknya lewat `ensureNoCycle`). Satu drag = satu PUT `reorder` (whole-tree), berbeda dari field yang harus PATCH satu per satu.
+11. **`GET /seo/:type/:id` melempar 404 kalau target belum punya SEO** — itu kondisi normal untuk page/entry yang baru dibuat. `useSeo` menangkapnya jadi `null` supaya panel menampilkan form kosong, bukan banner error. Panel SEO di-key ke `targetId`, **bukan** ke id baris SEO: penyimpanan pertama mengubah `data` dari null jadi baris, dan key berbasis id akan me-remount form tepat saat itu sehingga konfirmasi "Tersimpan" hilang.
+12. **`apiFetch` wajib tahan body kosong.** Nest menyerialisasi `null` sebagai 200 tanpa body (mis. SEO defaults yang belum pernah diset), dan `JSON.parse("")` melempar. Client membaca `text()` dulu lalu memperlakukan kosong sebagai "tidak ada nilai".
+13. **Daftar event webhook diambil dari `GET /webhooks/events`, bukan disalin ke frontend.** Backend menolak apa pun di luar daftarnya (`@IsIn`), jadi salinan yang menyimpang hanya menghasilkan simpan gagal. Bandingkan dengan `lib/permissions.ts` yang memang disalin karena tidak ada endpoint-nya.
+14. **Secret webhook & API key memakai pola "reveal sekali" yang sama**, karena konsekuensinya sama: backend hanya menyimpan nilai yang tidak bisa dipulihkan. Rotate secret diberi peringatan lebih keras — secret lama langsung mati dan receiver menolak semua kiriman sampai yang baru dipasang.
+15. **Chart analytics memakai `primary-600` (#0052cc), bukan primary-700.** Terukur, bukan selera: `#00419c` ada di OKLCH L 0.402, di bawah band mark 0.43–0.77; `primary-600` step pertama di ramp yang sama yang lolos band + chroma floor + kontras ≥3:1. Tombol tetap primary-700 — chrome UI, bukan mark data. Chart-nya single-series: tanpa legend, satu hue untuk semua batang, label langsung hanya di puncak, plus tampilan tabel sebagai jalur tanpa hover. Detail di `design.md` repo admin.
+16. **Tidak ada tautan preview ke frontend.** CMS tidak tahu route preview website klien, dan tautan tebakan yang 404 lebih buruk daripada tidak ada tautan. Panel memberi token + URL Content API (`?preview=`) yang pasti jalan, lalu menjelaskan frontend harus meneruskannya sendiri.
+17. **Anggota tidak bisa mengubah/menghapus keanggotaannya sendiri** (`MembersService.ensureNotSelf`, 400). Menurunkan diri sendiri itu pintu satu arah: begitu role kehilangan `members.manage`, membatalkannya butuh orang lain — satu klik bisa mengunci owner terakhir dan hanya platform admin yang bisa menyelamatkan. **Actor di-oper eksplisit dari controller**, bukan dibaca dari `RequestContextStore`: aturan otorisasi yang bergantung pada state implisit akan diam-diam lolos di tempat state itu tidak ada (seed/cron) — persis tempat kesalahan tidak akan ketahuan. (ALS tetap khusus audit.)
+18. **Platform admin di daftar anggota ditampilkan + diberi badge + role-nya dikunci di UI**, bukan disembunyikan atau ditolak di API. `PermissionsGuard` short-circuit untuk SUPER_ADMIN/PLATFORM_ADMIN, jadi role website mereka **tidak memberi apa pun dan mengubahnya tidak mencabut apa pun** — terverifikasi: owner menurunkan super admin jadi Viewer, super admin tetap 38 permission dan tetap 200 di rute Owner-only. Karena itu `MEMBER_INCLUDE` kini mengekspos `platformRole`. Menyembunyikan mereka justru kurang transparan (ada akun berkuasa penuh yang tak terlihat); menolak di API menambah aturan tanpa manfaat keamanan, karena tidak ada eskalasi hak (owner → `PATCH /users` tetap 403).
+19. **Ekspor CSV submission hanya mengekspor halaman yang tampil.** Tidak ada endpoint ekspor massal; berpura-pura mengekspor semuanya berarti berbohong atau menembaki server dengan permintaan halaman berurutan. Nilai di-escape dan diberi kutip pembuka bila diawali `=`/`+`/`-`/`@` supaya Excel tidak memperlakukannya sebagai formula.
+
+### Dua audiens, satu panel (2026-07-15)
+
+Panel melayani **platform admin** (staf ModernWeb) dan **klien** (owner/manager/editor satu website) dengan IA yang berbeda, dipilih dari `platformRole`:
+
+| | Platform admin | Klien |
+|---|---|---|
+| Sidebar | Websites, Pengguna | Dashboard, Collection, Media, Forms, Setting, Anggota |
+| Pemilih website | selalu | dilewati kalau cuma punya 1 |
+| Navigasi dalam website | tab bar 13 tab | sidebar (tab bar tidak dirender) |
+| Collection | field builder | langsung ke entries |
+| Detail website | form yang bisa diedit | informasi read-only |
+| Pages, Menus, Audit, Role | ada | tidak ada |
+| API Keys, Webhooks | ada | **tidak bisa sama sekali** (izin dicabut) |
+
+Keputusan:
+
+20. **Klien tidak boleh menyentuh API Keys & Webhooks — dicabut dari izin, bukan disembunyikan.** `PLATFORM_ONLY_PERMISSIONS` (apikeys.read/manage, webhooks.read/manage) tidak dimiliki role website mana pun; hanya short-circuit platform-role di `PermissionsGuard` yang menjangkaunya. Alasannya: API key mengautentikasi frontend yang **ModernWeb** bangun dan deploy — klien tak punya tempat memasangnya; webhook mengirim konten ke URL sembarang. Kalau hanya menunya disembunyikan, owner tetap bisa mencetak kredensial lewat curl — batas yang cuma terlihat ada. Terverifikasi: owner `POST /api-keys` → **403**.
+21. **Seed mencabut izin platform-only dari SEMUA website** (`stripPlatformOnlyPermissions`), bukan cuma yang di-seed. Role dibuat dari `DEFAULT_ROLES` saat website dibuat, jadi website lama tetap membawa izin lama — batasnya akan bocor di setiap website yang sudah ada. Ini **strip, bukan reset**: tidak pernah memberi apa pun, jadi aman atas role yang sudah dikustomisasi. (Terbukti perlu: `garis-transport` masih punya Owner ber-`apikeys.manage` sampai strip ini jalan.)
+22. **Detail website read-only untuk klien.** Slug dan domain tertanam di frontend yang sudah dideploy dan di URL Content API publik — mengubahnya operasi platform, bukan sesuatu yang klien bisa sentuh tak sengaja. Klien melihat kartu informasi; platform admin tetap dapat form.
+23. **Builder collection bukan milik klien** meski `collections.manage` ada di role Owner. Bentuk konten didefinisikan ModernWeb; klien mengisinya. Karena itu gerbangnya `isPlatformAdmin && can(...)`, bukan `can(...)` saja — satu-satunya tempat UI sengaja lebih ketat dari API, dan itu disengaja: mendefinisikan ulang field bukan hal yang klien butuhkan, tapi juga bukan bahaya keamanan sehingga tak perlu dicabut dari izin.
+24. **Settings + SEO jadi satu layar**, route `/seo` dihapus. Keduanya nilai website-wide yang dibaca frontend; memisahkannya membuat pembaca menebak-nebak mana yang memuat "judul situs".
 
 ## Workflow Client Baru
 

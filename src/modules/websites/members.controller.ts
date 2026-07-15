@@ -8,7 +8,9 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import type { AuthUser } from '../../common/types/auth-user';
 import { AddMemberDto, UpdateMemberDto } from './dto/member.dto';
 import { MembersService } from './members.service';
 
@@ -36,8 +38,9 @@ export class MembersController {
     @Param('websiteId') websiteId: string,
     @Param('memberId') memberId: string,
     @Body() dto: UpdateMemberDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.membersService.updateRole(websiteId, memberId, dto);
+    return this.membersService.updateRole(websiteId, memberId, dto, user.id);
   }
 
   @Delete(':memberId')
@@ -45,7 +48,8 @@ export class MembersController {
   remove(
     @Param('websiteId') websiteId: string,
     @Param('memberId') memberId: string,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.membersService.remove(websiteId, memberId);
+    return this.membersService.remove(websiteId, memberId, user.id);
   }
 }

@@ -7,7 +7,7 @@ import type { AuthUser } from '../../common/types/auth-user';
 import { PaginationDto, paginate } from '../../common/dto/pagination.dto';
 import { PlatformRole } from '../../generated/prisma/client';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
-import { DEFAULT_ROLES } from '../rbac/permissions';
+import { DEFAULT_ROLES, PERMISSIONS } from '../rbac/permissions';
 import { CreateWebsiteDto, UpdateWebsiteDto } from './dto/create-website.dto';
 
 @Injectable()
@@ -83,6 +83,35 @@ export class WebsitesService {
     await this.ensureExists(websiteId);
     await this.prisma.website.delete({ where: { id: websiteId } });
     return { deleted: true };
+  }
+
+  /**
+   * The effective permissions of the caller on one website, so the admin panel
+   * can render only what the user may actually do. Deliberately mirrors
+   * PermissionsGuard — if the two ever disagree, the UI lies. Non-members get
+   * an empty list rather than an error: "you may do nothing here" is an answer
+   * the panel can render, a 403 is not.
+   */
+  async permissionsFor(user: AuthUser, websiteId: string) {
+    await this.ensureExists(websiteId);
+
+    if (
+      user.platformRole === PlatformRole.SUPER_ADMIN ||
+      user.platformRole === PlatformRole.PLATFORM_ADMIN
+    ) {
+      return { role: null, permissions: [...PERMISSIONS] };
+    }
+
+    const membership = await this.prisma.websiteUser.findUnique({
+      where: { userId_websiteId: { userId: user.id, websiteId } },
+      include: {
+        role: { select: { id: true, name: true, permissions: true } },
+      },
+    });
+    if (!membership) return { role: null, permissions: [] };
+
+    const { id, name, permissions } = membership.role;
+    return { role: { id, name }, permissions: (permissions as string[]) ?? [] };
   }
 
   private async ensureExists(websiteId: string) {

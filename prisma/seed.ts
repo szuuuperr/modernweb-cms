@@ -2,7 +2,10 @@ import 'dotenv/config';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
-import { DEFAULT_ROLES } from '../src/modules/rbac/permissions';
+import {
+  DEFAULT_ROLES,
+  PLATFORM_ONLY_PERMISSIONS,
+} from '../src/modules/rbac/permissions';
 import {
   EntryStatus,
   FieldType,
@@ -75,22 +78,37 @@ async function main() {
     });
   }
 
-  const ownerRole = await prisma.role.findUnique({
-    where: { websiteId_name: { websiteId: website.id, name: 'Owner' } },
+  await ensureMember(admin.id, website.id, 'Owner');
+
+  /**
+   * A website owner who is NOT a platform admin.
+   *
+   * The super admin above is also an Owner member, but that membership is inert:
+   * PermissionsGuard short-circuits for SUPER_ADMIN/PLATFORM_ADMIN and never
+   * looks at the role. So logging in as the super admin exercises none of RBAC.
+   * This account has platformRole NONE, so every permission it has comes from
+   * the Owner role — which is what a real client owner looks like, and the only
+   * way to see the panel behave as they will see it.
+   */
+  const ownerEmail = process.env.SEED_OWNER_EMAIL ?? 'owner@halwatravel.com';
+  const ownerPassword = process.env.SEED_OWNER_PASSWORD ?? 'owner123';
+
+  const owner = await prisma.user.upsert({
+    where: { email: ownerEmail },
+    // Left empty on purpose: a re-run must not clobber a password or a role the
+    // user changed by hand while testing.
+    update: {},
+    create: {
+      email: ownerEmail,
+      name: 'Owner Halwa Travel',
+      password: await bcrypt.hash(ownerPassword, 10),
+      platformRole: PlatformRole.NONE,
+    },
   });
-  if (ownerRole) {
-    await prisma.websiteUser.upsert({
-      where: {
-        userId_websiteId: { userId: admin.id, websiteId: website.id },
-      },
-      update: {},
-      create: {
-        userId: admin.id,
-        websiteId: website.id,
-        roleId: ownerRole.id,
-      },
-    });
-  }
+  await ensureMember(owner.id, website.id, 'Owner');
+  console.log(
+    `Website owner: ${owner.email} (password: ${ownerPassword}) — platformRole NONE, Owner of ${website.slug}`,
+  );
 
   let collection = await prisma.collection.findUnique({
     where: {
@@ -175,6 +193,67 @@ async function main() {
   }
 
   await seedFase2(website.id);
+  await stripPlatformOnlyPermissions();
+}
+
+/**
+ * Removes apikeys.* and webhooks.* from every website role, on every website.
+ *
+ * Roles are created from DEFAULT_ROLES at website-creation time, so websites
+ * made before those permissions became platform-only still carry them — the
+ * boundary would hold for new websites and leak on every existing one. The
+ * per-website `updateMany` above only refreshes the seeded website.
+ *
+ * This strips rather than resets: it never grants anything, so it is safe to
+ * run over roles an owner has customised. Anything else about their role is
+ * left exactly as they set it.
+ */
+async function stripPlatformOnlyPermissions() {
+  const roles = await prisma.role.findMany({
+    select: { id: true, name: true, permissions: true, websiteId: true },
+  });
+
+  let stripped = 0;
+  for (const role of roles) {
+    const current = (role.permissions as string[]) ?? [];
+    const cleaned = current.filter(
+      (p) => !PLATFORM_ONLY_PERMISSIONS.includes(p as never),
+    );
+    if (cleaned.length === current.length) continue;
+
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { permissions: cleaned },
+    });
+    stripped++;
+  }
+
+  console.log(
+    stripped > 0
+      ? `Stripped apikeys.*/webhooks.* from ${stripped} role(s) — platform-only now`
+      : 'No role carried platform-only permissions',
+  );
+}
+
+/**
+ * Gives a user a role on a website, idempotently. `update` is empty so a re-run
+ * never demotes someone whose role was changed since the last seed.
+ */
+async function ensureMember(
+  userId: string,
+  websiteId: string,
+  roleName: string,
+) {
+  const role = await prisma.role.findUnique({
+    where: { websiteId_name: { websiteId, name: roleName } },
+  });
+  if (!role) return;
+
+  await prisma.websiteUser.upsert({
+    where: { userId_websiteId: { userId, websiteId } },
+    update: {},
+    create: { userId, websiteId, roleId: role.id },
+  });
 }
 
 /** Pages, menus, SEO, settings and an API key for the seeded website. */

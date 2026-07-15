@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -9,7 +10,13 @@ import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { AddMemberDto, UpdateMemberDto } from './dto/member.dto';
 
 const MEMBER_INCLUDE = {
-  user: { select: { id: true, email: true, name: true } },
+  // platformRole is exposed so the admin panel can mark platform admins: their
+  // access comes from the platform role, not from this website's role, and
+  // editing that role changes nothing. Without it the members list would imply
+  // a power the row does not actually carry.
+  user: {
+    select: { id: true, email: true, name: true, platformRole: true },
+  },
   role: { select: { id: true, name: true } },
 } as const;
 
@@ -65,8 +72,14 @@ export class MembersService {
     return member;
   }
 
-  async updateRole(websiteId: string, memberId: string, dto: UpdateMemberDto) {
-    await this.findMemberOrThrow(websiteId, memberId);
+  async updateRole(
+    websiteId: string,
+    memberId: string,
+    dto: UpdateMemberDto,
+    actorId: string,
+  ) {
+    const existing = await this.findMemberOrThrow(websiteId, memberId);
+    this.ensureNotSelf(existing.userId, actorId);
     await this.ensureRoleBelongsToWebsite(websiteId, dto.roleId);
     const member = await this.prisma.websiteUser.update({
       where: { id: memberId },
@@ -80,11 +93,32 @@ export class MembersService {
     return member;
   }
 
-  async remove(websiteId: string, memberId: string) {
-    await this.findMemberOrThrow(websiteId, memberId);
+  async remove(websiteId: string, memberId: string, actorId: string) {
+    const existing = await this.findMemberOrThrow(websiteId, memberId);
+    this.ensureNotSelf(existing.userId, actorId);
     await this.prisma.websiteUser.delete({ where: { id: memberId } });
     this.audit(websiteId, 'removed', memberId);
     return { deleted: true };
+  }
+
+  /**
+   * Demoting or removing yourself is a one-way door: the moment the role loses
+   * members.manage, undoing it needs someone else. An Owner could lock the last
+   * owner out of a website with one click and only a platform admin could
+   * rescue them — so the change must come from another member who still holds
+   * members.manage.
+   *
+   * The actor is passed in rather than read from the request context: an
+   * authorization rule that depends on implicit state silently allows the call
+   * wherever that state is absent (seed, cron), which is exactly where a
+   * mistake would go unnoticed.
+   */
+  private ensureNotSelf(memberUserId: string, actorId: string) {
+    if (memberUserId === actorId) {
+      throw new BadRequestException(
+        'You cannot change or remove your own membership; ask another member with members.manage',
+      );
+    }
   }
 
   private async findMemberOrThrow(websiteId: string, memberId: string) {

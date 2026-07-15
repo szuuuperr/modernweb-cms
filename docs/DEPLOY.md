@@ -15,13 +15,27 @@ Stack: NestJS + MySQL + Redis + Nginx (TLS) di satu VPS, lewat `docker-compose.p
 | Nama | Record | Arahkan ke | Untuk |
 |---|---|---|---|
 | `api.modernwebid.com` | A | IP VPS | **CMS API — satu-satunya yang wajib untuk deploy ini** |
-| `admin.modernwebid.com` | CNAME | Vercel | Admin panel (Fase 5, repo terpisah) |
+| `cms.modernwebid.com` | CNAME | Vercel | Admin panel (Fase 5, repo terpisah) |
 | `modernwebid.com`, `www` | A / CNAME | Vercel | Situs ModernWeb sendiri (opsional) |
 
 Yang **tidak** perlu dibuat:
 
 - **Subdomain per website klien.** Halwa Travel, Notaris ABC, dst memakai domain mereka sendiri (`halwatravel.com`) dan disimpan di kolom `Website.domain`. Itu justru inti desain multi-website ini — klien baru tidak menambah subdomain di sini.
 - **Subdomain CDN/media.** Cloudinary menyajikan dari `res.cloudinary.com`. Baru relevan kalau nanti pindah ke storage sendiri.
+
+### Admin panel (`cms.modernwebid.com`)
+
+Panel dideploy terpisah ke Vercel dari repo `modernweb-cms-admin`. Agar login-nya jalan, API di sini **wajib** mengenali origin-nya:
+
+```bash
+ADMIN_ORIGINS="https://cms.modernwebid.com"   # boleh dipisah koma
+COOKIE_SECURE="true"                          # produksi selalu HTTPS
+COOKIE_SAMESITE="lax"                         # cms. & api. itu same-site
+```
+
+Hanya origin di `ADMIN_ORIGINS` yang mendapat `Access-Control-Allow-Credentials`. Origin lain tetap bisa membaca Content API publik tanpa cookie, persis seperti sebelumnya — jadi frontend klien tidak terpengaruh.
+
+> Refresh token dikirim sebagai cookie httpOnly `mwc_rt` ber-`Path=/api/v1/auth`. Karena `cms.` dan `api.` masih satu site, `SameSite=lax` cukup. **Preview deployment Vercel (`*.vercel.app`) beda site** — kalau perlu dipakai, tambahkan origin-nya ke `ADMIN_ORIGINS` dan set `COOKIE_SAMESITE="none"`.
 
 ### Email (kalau notifikasi form dipakai)
 

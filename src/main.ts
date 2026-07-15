@@ -2,6 +2,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
+import type { Request } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -20,7 +22,26 @@ async function bootstrap() {
     app.set('trust proxy', Number(trustProxy) || trustProxy);
   }
 
-  app.enableCors();
+  app.use(cookieParser());
+
+  // The admin panel sends its refresh cookie cross-origin, which needs an
+  // explicit origin + credentials: the wildcard is illegal with credentials,
+  // and reflecting *any* origin with them would let a hostile site call
+  // /auth/refresh and read back a fresh access token. So credentials are
+  // granted only to ADMIN_ORIGINS; every other origin keeps the open,
+  // cookie-less access the public Content API is consumed with.
+  const adminOrigins = (process.env.ADMIN_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.enableCors((req: Request, cb) => {
+    const origin = req.headers.origin;
+    cb(null, {
+      origin: true,
+      credentials: !!origin && adminOrigins.includes(origin),
+    });
+  });
+
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
     new ValidationPipe({

@@ -45,7 +45,12 @@ services:
     container_name: mwcms-prod-app
     restart: always
     environment:
-      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-modernweb_cms}
+      # allowPublicKeyRetrieval: MySQL 8 authenticates with caching_sha2_password,
+      # and over a non-TLS socket the driver must fetch the server's RSA key or
+      # the connection is refused outright. The risk it carries (trusting an
+      # unverified server's key) is bounded here: this hop never leaves the
+      # compose network, and mysql publishes no host port.
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-modernweb_cms}?allowPublicKeyRetrieval=true
       REDIS_URL: redis://redis:6379
       # No defaults on purpose — the stack refuses to start with weak secrets.
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.production}
@@ -54,6 +59,11 @@ services:
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       APP_URL: ${APP_URL:?set APP_URL in .env.production}
       PORT: 3000
+      # Origins allowed to send the httpOnly refresh cookie (the admin panel).
+      # Empty means no browser can log into the panel, so it has no default.
+      ADMIN_ORIGINS: ${ADMIN_ORIGINS:?set ADMIN_ORIGINS in .env.production}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       # One proxy hop (nginx), so req.ip is the real client — without this the
       # rate limiter would treat every anonymous visitor as one client.
       TRUST_PROXY: '1'
